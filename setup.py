@@ -52,6 +52,7 @@ class _M2CryptoBuildExt(build_ext.build_ext):
         opensslIncludeDir = os.path.join(self.openssl, 'include')
         opensslLibraryDir = os.path.join(self.openssl, 'lib')
         for i in [
+            '/usr/include/i386-linux-gnu', # multi arch on debian & ubuntu
             '/usr/include/x86_64-linux-gnu', # multi arch on debian & ubuntu
         ]:
             if os.path.exists(i):
