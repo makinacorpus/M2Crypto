@@ -113,7 +113,8 @@ class _M2CryptoBuildExt(build_ext.build_ext):
         # known.
         self.swig_opts.append('-outdir')
         self.swig_opts.append(os.path.join(self.build_lib, 'M2Crypto'))
-
+        if not os.path.exists(os.path.join(self.build_lib, 'M2Crypto')):
+            os.makedirs(os.path.join(self.build_lib, 'M2Crypto'))
         self.include_dirs.append(os.path.join(os.getcwd(), 'SWIG'))
 
         if sys.platform == 'cygwin':
