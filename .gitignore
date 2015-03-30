@@ -1,4 +1,5 @@
 SWIG/_m2crypto.py
+build
 SWIG/_m2crypto_wrap.c
 *.so
 *pyc
