@@ -1,7 +1,7 @@
 /* Copyright (c) 1999-2002 Ng Pheng Siong. All rights reserved.
  * Copyright (c) 2009-2010 Heikki Toivonen. All rights reserved.
 */
-/* $Id: _util.i 721 2010-02-13 06:30:33Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/x509v3.h>

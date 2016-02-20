@@ -31,18 +31,19 @@ drwxr-xr-x  12 0        0             512 May 31 17:08 python2.1
 
 Copyright (c) 1999-2003 Ng Pheng Siong. All rights reserved."""
 
-# Python
-from ftplib import *
-from ftplib import parse150, parse227
-from ftplib import error_reply, error_temp, error_perm, error_proto
-import socket, time
+# We want to import whole stdlib ftplib objects, because our users want
+# to use them.
+from ftplib import *  # noqa
+import socket  # noqa
+import time  # noqa
 
 # M2Crypto
 import SSL
 
-DEFAULT_PROTOCOL='sslv23'
+DEFAULT_PROTOCOL = 'sslv23'
 
-class FTP_TLS(FTP):
+
+class FTP_TLS(FTP):  # noqa
 
     """Python OO interface to client-side FTP/TLS."""
 
@@ -74,12 +75,12 @@ class FTP_TLS(FTP):
         self.voidcmd('PBSZ 0')
         self.voidcmd('PROT P')
         self.prot = 1
-            
+
     def prot_c(self):
         """Set up data connection in the clear."""
         self.voidcmd('PROT C')
         self.prot = 0
-            
+
     def ntransfercmd(self, cmd, rest=None):
         """Initiate a data transfer."""
         conn, size = FTP.ntransfercmd(self, cmd, rest)
@@ -90,5 +91,3 @@ class FTP_TLS(FTP):
             conn.set_session(self.sock.get_session())
             conn.connect_ssl()
         return conn, size
- 
-

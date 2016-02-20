@@ -7,14 +7,18 @@
 ** Copyright (c) 2009-2010 Heikki Toivonen. All rights reserved.
 **
 */
-/* $Id: _ssl.i 721 2010-02-13 06:30:33Z heikki $ */
+/* $Id$ */
 
 %{
 #include <pythread.h>
+#include <limits.h>
 #include <openssl/bio.h>
 #include <openssl/dh.h>
 #include <openssl/ssl.h>
+#include <openssl/tls1.h>
 #include <openssl/x509.h>
+#include <poll.h>
+#include <sys/time.h>
 %}
 
 %apply Pointer NONNULL { SSL_CTX * };
@@ -48,18 +52,33 @@ extern const char *SSL_alert_desc_string(int);
 %rename(ssl_get_alert_desc_v) SSL_alert_desc_string_long;
 extern const char *SSL_alert_desc_string_long(int);
 
-/*%rename(sslv2_method) SSLv2_method;
+#ifndef OPENSSL_NO_SSL2
+%rename(sslv2_method) SSLv2_method;
 extern SSL_METHOD *SSLv2_method(void);
-*/
+#endif
+#ifndef OPENSSL_NO_SSL3
 %rename(sslv3_method) SSLv3_method;
 extern SSL_METHOD *SSLv3_method(void);
+#endif
 %rename(sslv23_method) SSLv23_method;
 extern SSL_METHOD *SSLv23_method(void);
 %rename(tlsv1_method) TLSv1_method;
 extern SSL_METHOD *TLSv1_method(void);
 
+%typemap(out) SSL_CTX * {
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
+
+    if ($1 != NULL)
+        $result = SWIG_NewPointerObj($1, $1_descriptor, 0);
+    else {
+        PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
+        $result = NULL;
+    }
+}
 %rename(ssl_ctx_new) SSL_CTX_new;
 extern SSL_CTX *SSL_CTX_new(SSL_METHOD *);
+%typemap(out) SSL_CTX *;
+
 %rename(ssl_ctx_free) SSL_CTX_free;
 extern void SSL_CTX_free(SSL_CTX *);
 %rename(ssl_ctx_set_verify_depth) SSL_CTX_set_verify_depth;
@@ -156,6 +175,11 @@ extern long SSL_SESSION_set_timeout(SSL_SESSION *, long);
 %rename(ssl_session_get_timeout) SSL_SESSION_get_timeout;
 extern long SSL_SESSION_get_timeout(CONST SSL_SESSION *);
 
+extern PyObject *ssl_accept(SSL *ssl, double timeout = -1);
+extern PyObject *ssl_connect(SSL *ssl, double timeout = -1);
+extern PyObject *ssl_read(SSL *ssl, int num, double timeout = -1);
+extern int ssl_write(SSL *ssl, PyObject *blob, double timeout = -1);
+
 %constant int ssl_error_none              = SSL_ERROR_NONE;
 %constant int ssl_error_ssl               = SSL_ERROR_SSL;
 %constant int ssl_error_want_read         = SSL_ERROR_WANT_READ;
@@ -211,14 +235,19 @@ extern long SSL_SESSION_get_timeout(CONST SSL_SESSION *);
 %constant int SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER = SSL_MODE_ENABLE_PARTIAL_WRITE;
 %constant int SSL_MODE_AUTO_RETRY           = SSL_MODE_AUTO_RETRY;
 
+%ignore ssl_handle_error;
+%ignore ssl_sleep_with_timeout;
 %inline %{
 static PyObject *_ssl_err;
+static PyObject *_ssl_timeout_err;
 
-void ssl_init(PyObject *ssl_err) {
+void ssl_init(PyObject *ssl_err, PyObject *ssl_timeout_err) {
     SSL_library_init();
     SSL_load_error_strings();
     Py_INCREF(ssl_err);
+    Py_INCREF(ssl_timeout_err);
     _ssl_err = ssl_err;
+    _ssl_timeout_err = ssl_timeout_err;
 }
 
 void ssl_ctx_passphrase_callback(SSL_CTX *ctx, PyObject *pyfunc) {
@@ -376,6 +405,17 @@ long ssl_get_mode(SSL *ssl) {
     return SSL_get_mode(ssl);
 }
 
+int ssl_set_tlsext_host_name(SSL *ssl, const char *name) {
+    long l;
+
+    if (!(l = SSL_set_tlsext_host_name(ssl, name))) {
+        PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
+        return -1;
+    }
+    /* Return an "int" to match the 'typemap(out) int' in _lib.i */
+    return 1;
+}
+
 void ssl_set_client_CA_list_from_file(SSL *ssl, const char *ca_file) {
     SSL_set_client_CA_list(ssl, SSL_load_client_CA_file(ca_file));
 }
@@ -404,36 +444,130 @@ int ssl_set_fd(SSL *ssl, int fd) {
     return ret;
 }
 
-PyObject *ssl_accept(SSL *ssl) {
-    PyObject *obj = NULL;
-    int r, err;
+static void ssl_handle_error(int ssl_err, int ret) {
+    int err;
 
+    switch (ssl_err) {
+        case SSL_ERROR_SSL:
+            PyErr_SetString(_ssl_err,
+                            ERR_reason_error_string(ERR_get_error()));
+            break;
+        case SSL_ERROR_SYSCALL:
+            err = ERR_get_error();
+            if (err)
+                PyErr_SetString(_ssl_err, ERR_reason_error_string(err));
+            else if (ret == 0)
+                PyErr_SetString(_ssl_err, "unexpected eof");
+            else if (ret == -1)
+                PyErr_SetFromErrno(_ssl_err);
+            else
+                assert(0);
+            break;
+		default:
+            PyErr_SetString(_ssl_err, "unexpected SSL error");
+     }
+}
+
+static int ssl_sleep_with_timeout(SSL *ssl, const struct timeval *start,
+                                  double timeout, int ssl_err) {
+    struct pollfd fd;
+    struct timeval tv;
+    int ms, tmp;
+
+    assert(timeout > 0);
+ again:
+    gettimeofday(&tv, NULL);
+    /* tv >= start */
+    if ((timeout + start->tv_sec - tv.tv_sec) > INT_MAX / 1000)
+        ms = -1;
+    else {
+        int fract;
+
+        ms = ((start->tv_sec + (int)timeout) - tv.tv_sec) * 1000;
+        fract = (start->tv_usec + (timeout - (int)timeout) * 1000000
+                 - tv.tv_usec + 999) / 1000;
+        if (ms > 0 && fract > INT_MAX - ms)
+            ms = -1;
+        else {
+            ms += fract;
+            if (ms <= 0)
+                goto timeout;
+        }
+    }
+    switch (ssl_err) {
+	    case SSL_ERROR_WANT_READ:
+            fd.fd = SSL_get_rfd(ssl);
+            fd.events = POLLIN;
+            break;
+
+	    case SSL_ERROR_WANT_WRITE:
+            fd.fd = SSL_get_wfd(ssl);
+            fd.events = POLLOUT;
+            break;
+
+	    case SSL_ERROR_WANT_X509_LOOKUP:
+            return 0; /* FIXME: is this correct? */
+
+	    default:
+            assert(0);
+    }
+    if (fd.fd == -1) {
+        PyErr_SetString(_ssl_err, "timeout on a non-FD SSL");
+        return -1;
+    }
+    Py_BEGIN_ALLOW_THREADS
+    tmp = poll(&fd, 1, ms);
+    Py_END_ALLOW_THREADS
+    switch (tmp) {
+    	case 1:
+            return 0;
+    	case 0:
+            goto timeout;
+    	case -1:
+            if (errno == EINTR)
+                goto again;
+            PyErr_SetFromErrno(_ssl_err);
+            return -1;
+    }
+    return 0;
+
+ timeout:
+    PyErr_SetString(_ssl_timeout_err, "timed out");
+    return -1;
+}
+
+PyObject *ssl_accept(SSL *ssl, double timeout) {
+    PyObject *obj = NULL;
+    int r, ssl_err;
+    struct timeval tv;
+
+    if (timeout > 0)
+        gettimeofday(&tv, NULL);
+ again:
     Py_BEGIN_ALLOW_THREADS
     r = SSL_accept(ssl);
+    ssl_err = SSL_get_error(ssl, r);
     Py_END_ALLOW_THREADS
 
 
-    switch (SSL_get_error(ssl, r)) {
+    switch (ssl_err) {
         case SSL_ERROR_NONE:
         case SSL_ERROR_ZERO_RETURN:
             obj = PyInt_FromLong((long)1);
             break;
         case SSL_ERROR_WANT_WRITE:
         case SSL_ERROR_WANT_READ:
-            obj = PyInt_FromLong((long)0);
-            break;
-        case SSL_ERROR_SSL:
-            PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
+            if (timeout <= 0) {
+                obj = PyInt_FromLong((long)0);
+                break;
+            }
+            if (ssl_sleep_with_timeout(ssl, &tv, timeout, ssl_err) == 0)
+                goto again;
             obj = NULL;
             break;
+        case SSL_ERROR_SSL:
         case SSL_ERROR_SYSCALL:
-            err = ERR_get_error();
-            if (err)
-                PyErr_SetString(_ssl_err, ERR_reason_error_string(err));
-            else if (r == 0)
-                PyErr_SetString(_ssl_err, "unexpected eof");
-            else if (r == -1)
-                PyErr_SetFromErrno(_ssl_err);
+            ssl_handle_error(ssl_err, r);
             obj = NULL;
             break;
     }
@@ -442,36 +576,38 @@ PyObject *ssl_accept(SSL *ssl) {
     return obj;
 }
 
-PyObject *ssl_connect(SSL *ssl) {
+PyObject *ssl_connect(SSL *ssl, double timeout) {
     PyObject *obj = NULL;
-    int r, err;
+    int r, ssl_err;
+    struct timeval tv;
 
+    if (timeout > 0)
+        gettimeofday(&tv, NULL);
+ again:
     Py_BEGIN_ALLOW_THREADS
     r = SSL_connect(ssl);
+    ssl_err = SSL_get_error(ssl, r);
     Py_END_ALLOW_THREADS
 
     
-    switch (SSL_get_error(ssl, r)) {
+    switch (ssl_err) {
         case SSL_ERROR_NONE:
         case SSL_ERROR_ZERO_RETURN:
             obj = PyInt_FromLong((long)1);
             break;
         case SSL_ERROR_WANT_WRITE:
         case SSL_ERROR_WANT_READ:
-            obj = PyInt_FromLong((long)0);
-            break;
-        case SSL_ERROR_SSL:
-            PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
+            if (timeout <= 0) {
+                obj = PyInt_FromLong((long)0);
+                break;
+            }
+            if (ssl_sleep_with_timeout(ssl, &tv, timeout, ssl_err) == 0)
+                goto again;
             obj = NULL;
             break;
+        case SSL_ERROR_SSL:
         case SSL_ERROR_SYSCALL:
-            err = ERR_get_error();
-            if (err)
-                PyErr_SetString(_ssl_err, ERR_reason_error_string(err));
-            else if (r == 0)
-                PyErr_SetString(_ssl_err, "unexpected eof");
-            else if (r == -1)
-                PyErr_SetFromErrno(_ssl_err);
+            ssl_handle_error(ssl_err, r);
             obj = NULL;
             break;
     }
@@ -484,10 +620,11 @@ void ssl_set_shutdown1(SSL *ssl, int mode) {
     SSL_set_shutdown(ssl, mode);
 }
 
-PyObject *ssl_read(SSL *ssl, int num) {
+PyObject *ssl_read(SSL *ssl, int num, double timeout) {
     PyObject *obj = NULL;
     void *buf;
-    int r, err;
+    int r;
+    struct timeval tv;
 
     if (!(buf = PyMem_Malloc(num))) {
         PyErr_SetString(PyExc_MemoryError, "ssl_read");
@@ -495,37 +632,44 @@ PyObject *ssl_read(SSL *ssl, int num) {
     }
 
 
+    if (timeout > 0)
+        gettimeofday(&tv, NULL);
+ again:
     Py_BEGIN_ALLOW_THREADS
     r = SSL_read(ssl, buf, num);
     Py_END_ALLOW_THREADS
 
 
-    switch (SSL_get_error(ssl, r)) {
-        case SSL_ERROR_NONE:
-        case SSL_ERROR_ZERO_RETURN:
-            buf = PyMem_Realloc(buf, r);
-            obj = PyString_FromStringAndSize(buf, r);
-            break;
-        case SSL_ERROR_WANT_WRITE:
-        case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_X509_LOOKUP:
-            Py_INCREF(Py_None);
-            obj = Py_None;
-            break;
-        case SSL_ERROR_SSL:
-            PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
-            obj = NULL;
-            break;
-        case SSL_ERROR_SYSCALL:
-            err = ERR_get_error();
-            if (err)
-                PyErr_SetString(_ssl_err, ERR_reason_error_string(err));
-            else if (r == 0)
-                PyErr_SetString(_ssl_err, "unexpected eof");
-            else if (r == -1)
-                PyErr_SetFromErrno(_ssl_err);
-            obj = NULL;
-            break;
+    if (r >= 0) {
+        buf = PyMem_Realloc(buf, r);
+        obj = PyString_FromStringAndSize(buf, r);
+    } else {
+        int ssl_err;
+
+        ssl_err = SSL_get_error(ssl, r);
+        switch (ssl_err) {
+            case SSL_ERROR_NONE:
+            case SSL_ERROR_ZERO_RETURN:
+                assert(0);
+
+            case SSL_ERROR_WANT_WRITE:
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_X509_LOOKUP:
+                if (timeout <= 0) {
+                    Py_INCREF(Py_None);
+                    obj = Py_None;
+                    break;
+                }
+                if (ssl_sleep_with_timeout(ssl, &tv, timeout, ssl_err) == 0)
+                    goto again;
+                obj = NULL;
+                break;
+            case SSL_ERROR_SSL:
+            case SSL_ERROR_SYSCALL:
+                ssl_handle_error(ssl_err, r);
+                obj = NULL;
+                break;
+        }
     }
     PyMem_Free(buf);
 
@@ -583,22 +727,26 @@ PyObject *ssl_read_nbio(SSL *ssl, int num) {
     return obj;
 }
 
-int ssl_write(SSL *ssl, PyObject *blob) {
-    const void *buf;
-    int len, r, err, ret;
+int ssl_write(SSL *ssl, PyObject *blob, double timeout) {
+    Py_buffer buf;
+    int r, ssl_err, ret;
+    struct timeval tv;
 
 
-    if (m2_PyObject_AsReadBufferInt(blob, &buf, &len) == -1) {
+    if (m2_PyObject_GetBufferInt(blob, &buf, PyBUF_CONTIG_RO) == -1) {
         return -1;
     }
 
-    
+    if (timeout > 0)
+        gettimeofday(&tv, NULL);
+ again:
     Py_BEGIN_ALLOW_THREADS
-    r = SSL_write(ssl, buf, len);
+    r = SSL_write(ssl, buf.buf, buf.len);
+    ssl_err = SSL_get_error(ssl, r);
     Py_END_ALLOW_THREADS
 
 
-    switch (SSL_get_error(ssl, r)) {
+    switch (ssl_err) {
         case SSL_ERROR_NONE:
         case SSL_ERROR_ZERO_RETURN:
             ret = r;
@@ -606,40 +754,37 @@ int ssl_write(SSL *ssl, PyObject *blob) {
         case SSL_ERROR_WANT_WRITE:
         case SSL_ERROR_WANT_READ:
         case SSL_ERROR_WANT_X509_LOOKUP:
+            if (timeout <= 0) {
+                ret = -1;
+                break;
+            }
+            if (ssl_sleep_with_timeout(ssl, &tv, timeout, ssl_err) == 0)
+                goto again;
             ret = -1;
             break;
         case SSL_ERROR_SSL:
-            PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
-            ret = -1;
-            break;
         case SSL_ERROR_SYSCALL:
-            err = ERR_get_error();
-            if (err)
-                PyErr_SetString(_ssl_err, ERR_reason_error_string(ERR_get_error()));
-            else if (r == 0)
-                PyErr_SetString(_ssl_err, "unexpected eof");
-            else if (r == -1)
-                PyErr_SetFromErrno(_ssl_err);
+            ssl_handle_error(ssl_err, r);
         default:
             ret = -1;
     }
     
-    
+    m2_PyBuffer_Release(blob, &buf);
     return ret;
 }
 
 int ssl_write_nbio(SSL *ssl, PyObject *blob) {
-    const void *buf;
-    int len, r, err, ret;
+    Py_buffer buf;
+    int r, err, ret;
 
 
-    if (m2_PyObject_AsReadBufferInt(blob, &buf, &len) == -1) {
+    if (m2_PyObject_GetBufferInt(blob, &buf, PyBUF_CONTIG_RO) == -1) {
         return -1;
     }
 
     
     Py_BEGIN_ALLOW_THREADS
-    r = SSL_write(ssl, buf, len);
+    r = SSL_write(ssl, buf.buf, buf.len);
     Py_END_ALLOW_THREADS
     
     
@@ -668,7 +813,7 @@ int ssl_write_nbio(SSL *ssl, PyObject *blob) {
             ret = -1;
     }
     
-    
+    m2_PyBuffer_Release(blob, &buf);
     return ret;
 }
 

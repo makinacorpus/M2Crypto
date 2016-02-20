@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 def suite():
     from M2Crypto import m2
     import os
     import unittest
-    
+
     def my_import(name):
         # See http://docs.python.org/lib/built-in-funcs.html#l2h-6
         components = name.split('.')
@@ -51,40 +53,43 @@ def suite():
     alltests = unittest.TestSuite()
     for module in map(my_import, modules_to_test):
         alltests.addTest(module.suite())
+
+    print('Version of OpenSSL is {0:x}'.format(m2.OPENSSL_VERSION_NUMBER))
+
     return alltests
 
 
 def dump_garbage():
     import gc
-    print '\nGarbage:'
+    print('\nGarbage:')
     gc.collect()
     if len(gc.garbage):
-    
-        print '\nLeaked objects:'
+
+        print('\nLeaked objects:')
         for x in gc.garbage:
             s = str(x)
-            if len(s) > 77: s = s[:73]+'...'
-            print type(x), '\n  ', s
-    
-        print 'There were %d leaks.' % len(gc.garbage)
+            if len(s) > 77: s = s[:73] + '...'
+            print(type(x), '\n  ', s)
+
+        print('There were %d leaks.' % len(gc.garbage))
     else:
-        print 'Python garbage collector did not detect any leaks.'
-        print 'However, it is still possible there are leaks in the C code.'
+        print('Python garbage collector did not detect any leaks.')
+        print('However, it is still possible there are leaks in the C code.')
 
 
 def runall(report_leaks=0):
     report_leaks = report_leaks
-    
+
     if report_leaks:
         import gc
         gc.enable()
         gc.set_debug(gc.DEBUG_LEAK & ~gc.DEBUG_SAVEALL)
-    
+
     import os, unittest
     from M2Crypto import Rand
-    
+
     try:
-        Rand.load_file('tests/randpool.dat', -1) 
+        Rand.load_file('tests/randpool.dat', -1)
         unittest.TextTestRunner(verbosity=2).run(suite())
         Rand.save_file('tests/randpool.dat')
     finally:
@@ -94,7 +99,7 @@ def runall(report_leaks=0):
 
     if report_leaks:
         dump_garbage()
-    
+
 
 if __name__ == '__main__':
     runall(0)

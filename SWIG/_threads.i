@@ -1,5 +1,5 @@
 /* Copyright (c) 1999 Ng Pheng Siong. All rights reserved. */
-/* $Id: _threads.i 690 2009-07-22 08:32:43Z heikki $ */
+/* $Id$ */
 
 %{
 #include <pythread.h>

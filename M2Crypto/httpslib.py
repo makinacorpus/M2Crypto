@@ -1,14 +1,14 @@
-"""M2Crypto support for Python's httplib. 
+"""M2Crypto support for Python's httplib.
 
 Copyright (c) 1999-2004 Ng Pheng Siong. All rights reserved."""
 
-import string, sys
+import sys
 import socket
 from urlparse import urlsplit, urlunsplit
 import base64
 
 from httplib import *
-from httplib import HTTPS_PORT # This is not imported with just '*'
+from httplib import HTTPS_PORT  # This is not imported with just '*'
 import SSL
 
 class HTTPSConnection(HTTPConnection):
@@ -22,7 +22,7 @@ class HTTPSConnection(HTTPConnection):
     def __init__(self, host, port=None, strict=None, **ssl):
         self.session = None
         keys = ssl.keys()
-        try: 
+        try:
             keys.remove('key_file')
         except ValueError:
             pass
@@ -44,10 +44,32 @@ class HTTPSConnection(HTTPConnection):
         HTTPConnection.__init__(self, host, port, strict)
 
     def connect(self):
-        self.sock = SSL.Connection(self.ssl_ctx)
-        if self.session:
-            self.sock.set_session(self.session)
-        self.sock.connect((self.host, self.port))
+        error = None
+        # We ignore the returned sockaddr because SSL.Connection.connect needs
+        # a host name.
+        for (family, _, _, _, _) in \
+                socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM):
+            sock = None
+            try:
+                sock = SSL.Connection(self.ssl_ctx, family=family)
+                if self.session is not None:
+                    sock.set_session(self.session)
+                sock.connect((self.host, self.port))
+
+                self.sock = sock
+                sock = None
+                return
+            except socket.error as e:
+                # Other exception are probably SSL-related, in that case we
+                # abort and the exception is forwarded to the caller.
+                error = e
+            finally:
+                if sock is not None:
+                    sock.close()
+
+        if error is None:
+            raise AssertionError("Empty list returned by getaddrinfo")
+        raise error
 
     def close(self):
         # This kludges around line 545 of httplib.py,
@@ -56,7 +78,7 @@ class HTTPSConnection(HTTPConnection):
         # object.
         #
         # M2Crypto doesn't close-here-keep-open-there,
-        # so, in effect, we don't close until the whole 
+        # so, in effect, we don't close until the whole
         # business is over and gc kicks in.
         #
         # XXX Long-running callers beware leakage.
@@ -65,16 +87,16 @@ class HTTPSConnection(HTTPConnection):
         # XXX but I've not investigated if the above conditions
         # XXX remain.
         pass
-    
+
     def get_session(self):
         return self.sock.get_session()
 
     def set_session(self, session):
         self.session = session
-        
+
 
 class HTTPS(HTTP):
-    
+
     _connection_class = HTTPSConnection
 
     def __init__(self, host='', port=None, strict=None, **ssl):
@@ -101,7 +123,7 @@ class ProxyHTTPSConnection(HTTPSConnection):
     through the proxy.
     """
 
-    _ports = {'http' : 80, 'https' : 443}
+    _ports = {'http': 80, 'https': 443}
     _AUTH_HEADER = "Proxy-Authorization"
     _UA_HEADER = "User-Agent"
 
@@ -120,13 +142,13 @@ class ProxyHTTPSConnection(HTTPSConnection):
         self._proxy_UA = None
 
     def putrequest(self, method, url, skip_host=0, skip_accept_encoding=0):
-        #putrequest is called before connect, so can interpret url and get
-        #real host/port to be used to make CONNECT request to proxy
+        # putrequest is called before connect, so can interpret url and get
+        # real host/port to be used to make CONNECT request to proxy
         proto, netloc, path, query, fragment = urlsplit(url)
         if not proto:
-            raise ValueError, "unknown URL type: %s" % url
-        
-        #get host & port
+            raise ValueError("unknown URL type: %s" % url)
+
+        # get host & port
         try:
             username_password, host_port = netloc.split('@')
         except ValueError:
@@ -136,19 +158,17 @@ class ProxyHTTPSConnection(HTTPSConnection):
             host, port = host_port.split(':')
         except ValueError:
             host = host_port
-            #try to get port from proto
+            # try to get port from proto
             try:
                 port = self._ports[proto]
             except KeyError:
-                raise ValueError, "unknown protocol for: %s" % url
+                raise ValueError("unknown protocol for: %s" % url)
 
         self._real_host = host
         self._real_port = int(port)
         rest = urlunsplit((None, None, path, query, fragment))
-        if sys.version_info < (2,4):
-            HTTPSConnection.putrequest(self, method, rest, skip_host)
-        else:
-            HTTPSConnection.putrequest(self, method, rest, skip_host, skip_accept_encoding)
+        HTTPSConnection.putrequest(self, method, rest, skip_host,
+                                   skip_accept_encoding)
 
     def putheader(self, header, value):
         # Store the auth header if passed in.
@@ -159,29 +179,29 @@ class ProxyHTTPSConnection(HTTPSConnection):
         else:
             HTTPSConnection.putheader(self, header, value)
 
-    def endheaders(self):
+    def endheaders(self, *args, **kwargs):
         # We've recieved all of hte headers. Use the supplied username
         # and password for authorization, possibly overriding the authstring
         # supplied in the headers.
         if not self._proxy_auth:
             self._proxy_auth = self._encode_auth()
 
-        HTTPSConnection.endheaders(self)
+        HTTPSConnection.endheaders(self, *args, **kwargs)
 
     def connect(self):
         HTTPConnection.connect(self)
 
-        #send proxy CONNECT request
+        # send proxy CONNECT request
         self.sock.sendall(self._get_connect_msg())
         response = HTTPResponse(self.sock)
         response.begin()
-        
+
         code = response.status
         if code != 200:
-            #proxy returned and error, abort connection, and raise exception
+            # proxy returned and error, abort connection, and raise exception
             self.close()
-            raise socket.error, "Proxy connection failed: %d" % code
-       
+            raise socket.error("Proxy connection failed: %d" % code)
+
         self._start_ssl()
 
     def _get_connect_msg(self):
@@ -191,7 +211,7 @@ class ProxyHTTPSConnection(HTTPSConnection):
         if self._proxy_UA:
             msg = msg + "%s: %s\r\n" % (self._UA_HEADER, self._proxy_UA)
         if self._proxy_auth:
-            msg = msg + "%s: %s\r\n" % (self._AUTH_HEADER, self._proxy_auth) 
+            msg = msg + "%s: %s\r\n" % (self._AUTH_HEADER, self._proxy_auth)
         msg = msg + "\r\n"
         return msg
 

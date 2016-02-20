@@ -4,7 +4,7 @@
 ** Portions created by Open Source Applications Foundation (OSAF) are
 ** Copyright (C) 2004 OSAF. All Rights Reserved.
 */
-/* $Id: _asn1.i 696 2009-07-28 03:43:19Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/asn1.h>

@@ -1,5 +1,5 @@
 /* Copyright (c) 1999-2004 Ng Pheng Siong. All rights reserved. */
-/* $Id: _lib.i 695 2009-07-24 06:37:01Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/dh.h>
@@ -47,9 +47,15 @@ void blob_free(Blob *blob) {
 /* Python helpers. */
 
 %}
+%ignore PyObject_CheckBuffer;
+%ignore PyObject_GetBuffer;
+%ignore PyBuffer_Release;
 %ignore m2_PyObject_AsReadBufferInt;
+%ignore m2_PyObject_GetBufferInt;
+%ignore m2_PyBuffer_Release;
 %ignore m2_PyString_AsStringAndSizeInt;
 %{
+
 static int
 m2_PyObject_AsReadBufferInt(PyObject *obj, const void **buffer,
                 int *buffer_len)
@@ -66,6 +72,37 @@ m2_PyObject_AsReadBufferInt(PyObject *obj, const void **buffer,
     }
     *buffer_len = len;
     return 0;
+}
+
+static int m2_PyObject_GetBufferInt(PyObject *obj, Py_buffer *view, int flags)
+{
+    int ret;
+
+    if (PyObject_CheckBuffer(obj))
+	ret = PyObject_GetBuffer(obj, view, flags);
+    else {
+	const void *buf;
+
+	ret = PyObject_AsReadBuffer(obj, &buf, &view->len);
+	if (ret == 0)
+	    view->buf = (void *)buf;
+    }
+    if (ret)
+	return ret;
+    if (view->len > INT_MAX) {
+	PyErr_SetString(PyExc_ValueError, "object too large");
+	m2_PyBuffer_Release(obj, view);
+	return -1;
+    }
+
+    return 0;
+}
+
+static void m2_PyBuffer_Release(PyObject *obj, Py_buffer *view)
+{
+    if (PyObject_CheckBuffer(obj))
+	PyBuffer_Release(view);
+    /* else do nothing, view->buf comes from PyObject_AsReadBuffer */
 }
 
 static int
@@ -100,6 +137,7 @@ int ssl_verify_callback(int ok, X509_STORE_CTX *ctx) {
     int cret;
     int new_style_callback = 0, warning_raised_exception=0;
     PyGILState_STATE gilstate;
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
 
     ssl = (SSL *)X509_STORE_CTX_get_app_data(ctx);
 
@@ -185,6 +223,7 @@ int ssl_verify_callback(int ok, X509_STORE_CTX *ctx) {
 void ssl_info_callback(const SSL *s, int where, int ret) {
     PyObject *argv, *retval, *_SSL;
     PyGILState_STATE gilstate;
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
 
     gilstate = PyGILState_Ensure();
 
@@ -204,6 +243,7 @@ DH *ssl_set_tmp_dh_callback(SSL *ssl, int is_export, int keylength) {
     PyObject *argv, *ret, *_ssl;
     DH *dh;
     PyGILState_STATE gilstate;
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
 
     gilstate = PyGILState_Ensure();
 
@@ -227,6 +267,7 @@ RSA *ssl_set_tmp_rsa_callback(SSL *ssl, int is_export, int keylength) {
     PyObject *argv, *ret, *_ssl;
     RSA *rsa;
     PyGILState_STATE gilstate;
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
 
     gilstate = PyGILState_Ensure();
 

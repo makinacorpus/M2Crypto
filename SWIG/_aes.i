@@ -1,5 +1,5 @@
 /* Copyright (c) 1999-2004 Ng Pheng Siong. All rights reserved. */
-/* $Id: _aes.i 721 2010-02-13 06:30:33Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/evp.h>
@@ -64,6 +64,7 @@ PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
     const void *buf;
     Py_ssize_t len;
     unsigned char *out;
+    PyObject *res;
 
     if (PyObject_AsReadBuffer(in, &buf, &len) == -1)
         return NULL;
@@ -76,7 +77,9 @@ PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
         AES_encrypt((const unsigned char *)in, out, key);
     else
         AES_decrypt((const unsigned char *)in, out, key);
-    return PyString_FromStringAndSize((char*)out, outlen);
+    res = PyString_FromStringAndSize((char*)out, outlen);
+    PyMem_Free(out);
+    return res;
 }
 
 int AES_type_check(AES_KEY *key) {

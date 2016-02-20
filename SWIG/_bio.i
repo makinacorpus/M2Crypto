@@ -5,7 +5,7 @@
  * Copyright (C) 2004-2005 OSAF. All Rights Reserved.
  * Author: Heikki Toivonen
 */
-/* $Id: _bio.i 695 2009-07-24 06:37:01Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/bio.h>

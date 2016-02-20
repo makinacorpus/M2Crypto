@@ -58,7 +58,7 @@ COLSPAN="3"
 ><TR
 ><TD
 ALIGN="LEFT"
->Revision $Id: howto.smime.html 646 2008-10-29 03:12:56Z heikki $</TD
+>Revision $Id$</TD
 ><TD
 ALIGN="LEFT"
 ></TD
@@ -646,7 +646,7 @@ CLASS="PROGRAMLISTING"
     # Instantiate an SMIME object; set it up; sign the buffer.
     s = SMIME.SMIME()
     s.load_key('signer_key.pem', 'signer.pem')
-    p7 = s.sign(buf)
+    p7 = s.sign(buf, SMIME.PKCS7_DETACHED)
     </PRE
 ><P
 ><TT
@@ -688,7 +688,7 @@ CLASS="PROGRAMLISTING"
     out.write('Subject: M2Crypto S/MIME testing\n')
     s.write(out, p7, buf)
 
-    print out.read()
+    print(out.read())
 
     # Save the PRNG's state.
     Rand.save_file('randpool.dat')
@@ -780,10 +780,10 @@ CLASS="PROGRAMLISTING"
     
     # Load the data, verify it.
     p7, data = SMIME.smime_load_pkcs7('sign.p7')
-    v = s.verify(p7)
-    print v
-    print data
-    print data.read()
+    v = s.verify(p7, data)
+    print(v)
+    print(data)
+    print(data.read())
     </PRE
 ><P
 >Here's the output of the above program:
@@ -878,7 +878,7 @@ CLASS="PROGRAMLISTING"
     out.write('Subject: M2Crypto S/MIME testing\n')
     s.write(out, p7)
     
-    print out.read()
+    print(out.read())
 
     # Save the PRNG's state.
     Rand.save_file('randpool.dat')
@@ -937,7 +937,7 @@ CLASS="PROGRAMLISTING"
     # Decrypt p7.
     out = s.decrypt(p7)
         
-    print out
+    print(out)
     </PRE
 ><P
 >Here's the output:
@@ -991,7 +991,7 @@ CLASS="PROGRAMLISTING"
     tmp = BIO.MemoryBuffer()
     
     # Write the signed message into the temporary buffer.
-    s.write(tmp, p7, buf)
+    s.write(tmp, p7)
     
     # Encrypt the temporary buffer.
     p7 = s.encrypt(tmp)
@@ -1003,7 +1003,7 @@ CLASS="PROGRAMLISTING"
     out.write('Subject: M2Crypto S/MIME testing\n')
     s.write(out, p7)
     
-    print out.read()
+    print(out.read())
     
     # Save the PRNG's state.
     Rand.save_file('randpool.dat')
@@ -1121,7 +1121,7 @@ CLASS="PROGRAMLISTING"
     p7, data = SMIME.smime_load_pkcs7_bio(p7_bio)
     v = s.verify(p7)
     
-    print v
+    print(v)
     </PRE
 ><P
 >The output is as follows:
@@ -1158,7 +1158,10 @@ CLASS="PROGRAMLISTING"
         s = SMIME.SMIME()
         if sign:
             s.load_key(from_key, from_cert)
-            p7 = s.sign(msg_bio, flags=SMIME.PKCS7_TEXT)
+            if encrypt:
+                p7 = s.sign(msg_bio, flags=SMIME.PKCS7_TEXT)
+            else:
+                p7 = s.sign(msg_bio, flags=SMIME.PKCS7_TEXT|SMIME.PKCS7_DETACHED)
             msg_bio = BIO.MemoryBuffer(msg) # Recreate coz sign() has consumed it.
     
         if encrypt:

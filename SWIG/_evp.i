@@ -49,6 +49,9 @@ extern const EVP_MD *EVP_sha512(void);
 %rename(digest_init) EVP_DigestInit;
 extern int EVP_DigestInit(EVP_MD_CTX *, const EVP_MD *);
 
+%rename(get_digestbyname) EVP_get_digestbyname;
+extern EVP_MD *EVP_get_digestbyname(const char * name);
+
 %rename(des_ecb) EVP_des_ecb;
 extern const EVP_CIPHER *EVP_des_ecb(void);
 %rename(des_ede_ecb) EVP_des_ede;
@@ -113,6 +116,8 @@ extern const EVP_CIPHER *EVP_aes_128_cbc(void);
 extern const EVP_CIPHER *EVP_aes_128_cfb(void);
 %rename(aes_128_ofb) EVP_aes_128_ofb;
 extern const EVP_CIPHER *EVP_aes_128_ofb(void);
+%rename(aes_128_ctr) EVP_aes_128_ctr;
+extern const EVP_CIPHER *EVP_aes_128_ctr(void);
 %rename(aes_192_ecb) EVP_aes_192_ecb;
 extern const EVP_CIPHER *EVP_aes_192_ecb(void);
 %rename(aes_192_cbc) EVP_aes_192_cbc;
@@ -121,6 +126,8 @@ extern const EVP_CIPHER *EVP_aes_192_cbc(void);
 extern const EVP_CIPHER *EVP_aes_192_cfb(void);
 %rename(aes_192_ofb) EVP_aes_192_ofb;
 extern const EVP_CIPHER *EVP_aes_192_ofb(void);
+%rename(aes_192_ctr) EVP_aes_192_ctr;
+extern const EVP_CIPHER *EVP_aes_192_ctr(void);
 %rename(aes_256_ecb) EVP_aes_256_ecb;
 extern const EVP_CIPHER *EVP_aes_256_ecb(void);
 %rename(aes_256_cbc) EVP_aes_256_cbc;
@@ -129,6 +136,8 @@ extern const EVP_CIPHER *EVP_aes_256_cbc(void);
 extern const EVP_CIPHER *EVP_aes_256_cfb(void);
 %rename(aes_256_ofb) EVP_aes_256_ofb;
 extern const EVP_CIPHER *EVP_aes_256_ofb(void);
+%rename(aes_256_ctr) EVP_aes_256_ctr;
+extern const EVP_CIPHER *EVP_aes_256_ctr(void);
 
 %rename(cipher_set_padding) EVP_CIPHER_CTX_set_padding;
 extern int EVP_CIPHER_CTX_set_padding(EVP_CIPHER_CTX *, int);
@@ -168,7 +177,7 @@ PyObject *pkcs5_pbkdf2_hmac_sha1(PyObject *pass,
                                  PyObject *salt,
                                  int iter,
                                  int keylen) {
-    unsigned char key[EVP_MAX_KEY_LENGTH];
+    unsigned char *key;
     unsigned char *saltbuf;
     char *passbuf;
     PyObject *ret;
@@ -181,10 +190,14 @@ PyObject *pkcs5_pbkdf2_hmac_sha1(PyObject *pass,
                                     &saltlen) == -1)
         return NULL;
 
+    key = PyMem_Malloc(keylen);
+    if (key == NULL)
+	return PyErr_NoMemory();
     PKCS5_PBKDF2_HMAC_SHA1(passbuf, passlen, saltbuf, saltlen, iter,
                            keylen, key);
     ret = PyString_FromStringAndSize((char*)key, keylen);
     OPENSSL_cleanse(key, keylen);
+    PyMem_Free(key);
     return ret;
 }
 
@@ -253,7 +266,10 @@ PyObject *hmac_init(HMAC_CTX *ctx, PyObject *key, const EVP_MD *md) {
     if (m2_PyObject_AsReadBufferInt(key, &kbuf, &klen) == -1)
         return NULL;
 
-    HMAC_Init(ctx, kbuf, klen, md);
+    if (!HMAC_Init(ctx, kbuf, klen, md)) {
+        PyErr_SetString(_evp_err, "HMAC_Init failed");
+        return NULL;
+    }
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -265,7 +281,10 @@ PyObject *hmac_update(HMAC_CTX *ctx, PyObject *blob) {
     if (PyObject_AsReadBuffer(blob, &buf, &len) == -1)
         return NULL;
 
-    HMAC_Update(ctx, buf, len);
+    if (!HMAC_Update(ctx, buf, len)) {
+        PyErr_SetString(_evp_err, "HMAC_Update failed");
+        return NULL;
+    }
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -279,7 +298,10 @@ PyObject *hmac_final(HMAC_CTX *ctx) {
         PyErr_SetString(PyExc_MemoryError, "hmac_final");
         return NULL;
     }
-    HMAC_Final(ctx, blob, (unsigned int *)&blen);
+    if (!HMAC_Final(ctx, blob, (unsigned int *)&blen)) {
+        PyErr_SetString(_evp_err, "HMAC_Final failed");
+        return NULL;
+    }
     ret = PyString_FromStringAndSize(blob, blen);
     PyMem_Free(blob);
     return ret;
@@ -501,6 +523,17 @@ EVP_PKEY *pkey_read_pem(BIO *f, PyObject *pyfunc) {
     Py_INCREF(pyfunc);
     Py_BEGIN_ALLOW_THREADS
     pk = PEM_read_bio_PrivateKey(f, NULL, passphrase_callback, (void *)pyfunc);
+    Py_END_ALLOW_THREADS
+    Py_DECREF(pyfunc);
+    return pk;
+}
+
+EVP_PKEY *pkey_read_pem_pubkey(BIO *f, PyObject *pyfunc) {
+    EVP_PKEY *pk;
+
+    Py_INCREF(pyfunc);
+    Py_BEGIN_ALLOW_THREADS
+    pk = PEM_read_bio_PUBKEY(f, NULL, passphrase_callback, (void *)pyfunc);
     Py_END_ALLOW_THREADS
     Py_DECREF(pyfunc);
     return pk;

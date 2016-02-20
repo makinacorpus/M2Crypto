@@ -1,5 +1,5 @@
 /* Copyright (c) 1999-2000 Ng Pheng Siong. All rights reserved. */
-/* $Id: _dsa.i 723 2010-02-13 06:53:13Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/bn.h>
@@ -150,6 +150,25 @@ PyObject *dsa_set_g(DSA *dsa, PyObject *value) {
     if (dsa->g)
         BN_free(dsa->g);
     dsa->g = bn;
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject *dsa_set_pub(DSA *dsa, PyObject *value) {
+    BIGNUM *bn;
+    const void *vbuf;
+    int vlen;
+
+    if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
+        return NULL;
+
+    if (!(bn = BN_mpi2bn((unsigned char *)vbuf, vlen, NULL))) {
+        PyErr_SetString(_dsa_err, ERR_reason_error_string(ERR_get_error()));
+        return NULL;
+    }
+    if (dsa->pub_key)
+        BN_free(dsa->pub_key);
+    dsa->pub_key = bn;
     Py_INCREF(Py_None);
     return Py_None;
 }

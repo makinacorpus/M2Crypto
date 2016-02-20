@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* Copyright (c) 1999 Ng Pheng Siong. All rights reserved. */
-/* $Id: _rc4.i 522 2007-05-08 22:21:51Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/rc4.h>

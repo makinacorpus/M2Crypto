@@ -5,37 +5,43 @@ Copyright (C) 2006 Open Source Applications Foundation. All Rights Reserved.
 Copyright (C) 2009-2010 Heikki Toivonen. All Rights Reserved.
 """
 
-import unittest, doctest
-from M2Crypto.SSL import Checker
-from M2Crypto import X509
-from M2Crypto import SSL
+import doctest
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
+
+from M2Crypto import Rand, SSL, X509
 from test_ssl import srv_host
 
 
 class CheckerTestCase(unittest.TestCase):
     def test_checker(self):
 
-        check = Checker.Checker(host=srv_host,
-                                peerCertHash='7B754EFA41A264AAD370D43460BC8229F9354ECE')
+        check = SSL.Checker.Checker(
+            host=srv_host,
+            peerCertHash='0C6BBAFAD2D6F775C38596399E6C4E5680A701C2')
         x509 = X509.load_cert('tests/server.pem')
-        assert check(x509, srv_host)
-        self.assertRaises(Checker.WrongHost, check, x509, 'example.com')
-        
-        doctest.testmod(Checker)
+        self.assertTrue(check(x509, srv_host))
+        with self.assertRaises(SSL.Checker.WrongHost):
+            check(x509, 'example.com')
 
-    
+        doctest.testmod(SSL.Checker)
+
+
 class ContextTestCase(unittest.TestCase):
     def test_ctx_load_verify_locations(self):
         ctx = SSL.Context()
-        self.assertRaises(ValueError, ctx.load_verify_locations, None, None)
-        
+        with self.assertRaises(ValueError):
+            ctx.load_verify_locations(None, None)
+
     def test_map(self):
         from M2Crypto.SSL.Context import map, _ctxmap
-        assert isinstance(map(), _ctxmap)
+        self.assertIsInstance(map(), _ctxmap)
         ctx = SSL.Context()
         assert map()
         ctx.close()
-        assert map() is _ctxmap.singleton
+        self.assertIs(map(), _ctxmap.singleton)
 
     def test_certstore(self):
         ctx = SSL.Context()
@@ -44,14 +50,14 @@ class ContextTestCase(unittest.TestCase):
         ctx.load_cert('tests/x509.pem')
 
         store = ctx.get_cert_store()
-        assert isinstance(store, X509.X509_Store)
+        self.assertIsInstance(store, X509.X509_Store)
 
 
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(CheckerTestCase))
     suite.addTest(unittest.makeSuite(ContextTestCase))
-    return suite    
+    return suite
 
 
 if __name__ == '__main__':

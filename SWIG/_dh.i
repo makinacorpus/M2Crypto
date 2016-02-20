@@ -1,5 +1,5 @@
 /* Copyright (c) 1999 Ng Pheng Siong. All rights reserved. */
-/* $Id: _dh.i 695 2009-07-24 06:37:01Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/bn.h>

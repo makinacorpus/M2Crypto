@@ -15,11 +15,13 @@ Copyright (C) 2004-2007 OSAF. All Rights Reserved.
 
 Copyright 2008-2011 Heikki Toivonen. All rights reserved.
 """
+from distutils.version import StrictVersion
 
-version_info = (0, 21, 1)
-version = '.'.join([str(_v) for _v in version_info])
+__version__ = '0.23.0'
+version = __version__
+version_info = StrictVersion(__version__).version
 
-import __m2crypto
+import _m2crypto
 import m2
 import ASN1
 import AuthCookie
@@ -43,10 +45,7 @@ import m2urllib
 # Backwards compatibility.
 urllib2 = m2urllib
 
-import sys
-if sys.version_info >= (2,4):
-    import m2urllib2
-del sys
+import m2urllib2
 
 import ftpslib
 import httpslib
@@ -54,7 +53,7 @@ import m2xmlrpclib
 import threading
 import util
 
-encrypt=1
-decrypt=0
+encrypt = 1
+decrypt = 0
 
-__m2crypto.lib_init()
+_m2crypto.lib_init()

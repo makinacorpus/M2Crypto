@@ -1,13 +1,10 @@
-import sys, os, tempfile
 import UserDict
-from email import Message
+import os
+import tempfile
+
 import M2Crypto
 
-if not (sys.version_info[0] >= 2 and sys.version_info[1] >= 2):
-    class object:
-        pass
-    True=1
-    False=0
+from email import Message
 
 
 class smimeplus(object):
@@ -17,7 +14,7 @@ class smimeplus(object):
         self.setcacert(cacert)
         self.randfile = randfile
         self.__loadrand()
-        
+
     def __passcallback(self, v):
         """private key passphrase callback function"""
         return self.passphrase
@@ -43,7 +40,7 @@ class smimeplus(object):
         return _data
 
     def __pack(self, msg):
-        """Convert 'msg' to string and put it into an memory buffer for 
+        """Convert 'msg' to string and put it into an memory buffer for
            openssl operation"""
         return M2Crypto.BIO.MemoryBuffer(self.__gettext(msg))
 
@@ -64,7 +61,7 @@ class smimeplus(object):
         _sender.load_key_bio(self.__pack(self.key), self.__pack(self.cert),
                 callback=self.__passcallback)
 
-        _signed = _sender.sign(self.__pack(msg))
+        _signed = _sender.sign(self.__pack(msg), M2Crypto.SMIME.PKCS7_DETACHED)
 
         _out = self.__pack(None)
         _sender.write(_out, _signed, self.__pack(msg))
@@ -72,7 +69,7 @@ class smimeplus(object):
 
     def verify(self, smsg, scert):
         """Verify to see if 'smsg' was signed by 'scert', and scert was
-           issued by cacert of this object.  Return message signed if success, 
+           issued by cacert of this object.  Return message signed if success,
            None otherwise"""
         # Load signer's cert.
         _x509 = M2Crypto.X509.load_cert_bio(self.__pack(scert))
@@ -89,34 +86,34 @@ class smimeplus(object):
         _sender = M2Crypto.SMIME.SMIME()
         _sender.set_x509_stack(_stack)
         _sender.set_x509_store(_store)
-    
+
         # Load signed message, verify it, and return result
         _p7, _data = M2Crypto.SMIME.smime_load_pkcs7_bio(self.__pack(smsg))
         try:
-            return _sender.verify(_p7, flags=M2Crypto.SMIME.PKCS7_SIGNED)
-        except M2Crypto.SMIME.SMIME_Error, _msg:
+            return _sender.verify(_p7, _data, flags=M2Crypto.SMIME.PKCS7_SIGNED)
+        except M2Crypto.SMIME.SMIME_Error as _msg:
             return None
 
     def encrypt(self, rcert, msg):
         # Instantiate an SMIME object.
         _sender = M2Crypto.SMIME.SMIME()
-    
+
         # Load target cert to encrypt to.
         _x509 = M2Crypto.X509.load_cert_bio(self.__pack(rcert))
         _stack = M2Crypto.X509.X509_Stack()
         _stack.push(_x509)
         _sender.set_x509_stack(_stack)
-    
+
         _sender.set_cipher(M2Crypto.SMIME.Cipher(self.cipher))
-    
+
         # Encrypt the buffer.
         _buf = self.__pack(self.__gettext(msg))
         _p7 = _sender.encrypt(_buf)
-        
+
         # Output p7 in mail-friendly format.
         _out = self.__pack('')
         _sender.write(_out, _p7)
-    
+
         # Save the PRNG's state.
         self.__saverand()
 
@@ -129,14 +126,14 @@ class smimeplus(object):
         _sender = M2Crypto.SMIME.SMIME()
         _sender.load_key_bio(self.__pack(self.key), self.__pack(self.cert),
                 callback=self.__passcallback)
-    
+
         # Load the encrypted data.
         _p7, _data = M2Crypto.SMIME.smime_load_pkcs7_bio(self.__pack(emsg))
-    
+
         # Decrypt p7.
         try:
             return _sender.decrypt(_p7)
-        except M2Crypto.SMIME.SMIME_Error, _msg:
+        except M2Crypto.SMIME.SMIME_Error as _msg:
             return None
 
     def addHeader(self, rcert, content, subject=''):
@@ -160,14 +157,14 @@ class X509_Subject(UserDict.UserDict):
         UserDict.UserDict.__init__(self)
         try:
             _data = substr.strip().split('/')
-        except AttributeError, _msg:
+        except AttributeError as _msg:
             pass
         else:
             for _i in _data:
                 try:
                     _k, _v = _i.split('=')
                     self[_k] = _v
-                except ValueError, _msg:
+                except ValueError as _msg:
                     pass
 
 

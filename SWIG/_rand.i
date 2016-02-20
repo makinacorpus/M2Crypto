@@ -2,7 +2,7 @@
 /* Copyright (c) 1999-2004 Ng Pheng Siong. All rights reserved.
  * Copyright (c) 2009-2010 Heikki Toivonen. All rights reserved.
 */
-/* $Id: _rand.i 721 2010-02-13 06:30:33Z heikki $ */
+/* $Id$ */
 
 %module _rand
 

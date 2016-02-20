@@ -1,7 +1,7 @@
 /* Copyright (c) 2000 Ng Pheng Siong. All rights reserved.
  * Copyright (c) 2009-2010 Heikki Toivonen. All rights reserved.
 */
-/* $Id: _pkcs7.i 723 2010-02-13 06:53:13Z heikki $ */
+/* $Id$ */
 
 %{
 #include <openssl/bio.h>
@@ -157,6 +157,7 @@ PyObject *smime_read_pkcs7(BIO *bio) {
     BIO *bcont = NULL;
     PKCS7 *p7;
     PyObject *tuple, *_p7, *_BIO;
+    PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
 
     if (BIO_method_type(bio) == BIO_TYPE_MEM) {
         /* OpenSSL FAQ explains that this is needed for mem BIO to return EOF,
